@@ -11,6 +11,7 @@ import '../view_models/expense_view_model.dart';
 import '../../data/models/expenses/expense_model.dart';
 import '../view_models/reciept/receipt_scan_view_model.dart';
 import 'analytics_screen.dart';
+import 'receipt_scan_screen.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -83,13 +84,33 @@ class DashboardScreen extends ConsumerWidget {
               minimumSize: Size(100, 60),
               padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               shape: RoundedRectangleBorder(
+                borderRadius: BorderRadiusGeometry.all(Radius.zero
+                ),
+              ),
+            ),
+            child: Icon(Icons.chat),
+          ),
+          SizedBox(height: 60, child: VerticalDivider(color: Colors.grey)),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => ReceiptScanScreen()),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              minimumSize: Size(100, 60),
+              padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadiusGeometry.only(
                   topRight: Radius.circular(12),
                   bottomRight: Radius.circular(12),
                 ),
               ),
             ),
-            child: Icon(Icons.all_inclusive_sharp),
+            child: Icon(Icons.photo),
           ),
         ],
       ),

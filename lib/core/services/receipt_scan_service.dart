@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../constants/app_constants.dart';
@@ -14,7 +15,7 @@ class ReceiptScanResult {
 }
 
 class ReceiptScanService {
-  static const _model = 'gemini-2.0-flash';
+  static const _model = 'gemma-4-26b-a4b-it';
   static final _key = AppConstants.geminiApiKey;
   static final _url =
       'https://generativelanguage.googleapis.com/v1beta/models/$_model:generateContent?key=$_key';
@@ -23,6 +24,7 @@ class ReceiptScanService {
     final bytes = await imageFile.readAsBytes();
     final base64Image = base64Encode(bytes);
     final mimeType = imageFile.path.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    dev.log("scan start");
 
     final body = jsonEncode({
       'contents': [
@@ -52,6 +54,7 @@ class ReceiptScanService {
     );
 
     if (res.statusCode != 200) {
+      dev.log("${res.body}");
       return ReceiptScanResult(rawError: 'API error ${res.statusCode}');
     }
 
@@ -78,4 +81,5 @@ class ReceiptScanService {
       return ReceiptScanResult(rawError: 'Parse failed: $e');
     }
   }
+
 }
