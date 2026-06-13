@@ -1,10 +1,15 @@
+import 'dart:io';
+
 import 'package:expense_tracker/presentation/views/category_screen.dart';
 import 'package:expense_tracker/presentation/views/chat_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
+import '../../core/services/receipt_scan_service.dart';
 import '../view_models/category_view_model.dart';
 import '../view_models/expense_view_model.dart';
 import '../../data/models/expenses/expense_model.dart';
+import '../view_models/reciept/receipt_scan_view_model.dart';
 import 'analytics_screen.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -67,7 +72,7 @@ class DashboardScreen extends ConsumerWidget {
           SizedBox(height: 60, child: VerticalDivider(color: Colors.grey)),
           ElevatedButton(
             onPressed: () {
-               Navigator.push(
+              Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => ChatScreen()),
               );
@@ -93,7 +98,7 @@ class DashboardScreen extends ConsumerWidget {
           : state.errorMessage != null
           ? Center(child: Text(state.errorMessage!))
           : CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
+              physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
               slivers: [
@@ -228,43 +233,44 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  void _showAddTransactionDialog(BuildContext context, WidgetRef ref) {
-    final amountController = TextEditingController();
-
-    // Local state to manage the selected type and category inside the dialog
-    String selectedType = 'expense'; // default value
-    int? selectedCategoryId;
-
-    // Read available categories from the state manager
+  void _showAddTransactionDialog(
+    BuildContext context,
+    WidgetRef ref, {
+    ReceiptScanResult? prefill,
+  }) {
+    final amountController = TextEditingController(
+      text: prefill?.amount?.toStringAsFixed(2) ?? '',
+    );
+    final merchantController = TextEditingController(
+      text: prefill?.merchantName ?? '',
+    );
+    String selectedType = 'expense';
     final categoryState = ref.read(categoryViewModelProvider);
     final categories = categoryState.categories;
 
-    // Filter categories to auto-select the first valid one as a default fallback
-    // 🟢 FIXED: Auto-select using the explicit type string property instead of guessing by ID ranges
-    final initialCategories = categories
-        .where((c) => c.type == selectedType)
-        .toList();
+    int? selectedCategoryId;
 
-    if (initialCategories.isNotEmpty) {
-      selectedCategoryId = initialCategories.first.id;
+    // Auto-match prefilled category name
+    if (prefill?.category != null) {
+      final match = categories
+          .where((c) => c.name == prefill!.category && c.type == 'expense')
+          .firstOrNull;
+      selectedCategoryId = match?.id;
     }
-
-    if (initialCategories.isNotEmpty) {
-      selectedCategoryId = initialCategories.first.id;
-    }
+    selectedCategoryId ??= categories
+        .where((c) => c.type == 'expense')
+        .firstOrNull
+        ?.id;
 
     showDialog(
       context: context,
       builder: (context) {
-        // StatefulBuilder lets us mutate local state values cleanly inside a dialog window frame
         return StatefulBuilder(
           builder: (context, setDialogState) {
             final theme = Theme.of(context);
-
-            // Dynamically filter categories based on the currently selected type
-            final filteredCategories = categories.where((c) {
-              return c.type == selectedType;
-            }).toList();
+            final filteredCategories = categories
+                .where((c) => c.type == selectedType)
+                .toList();
 
             return AlertDialog(
               title: const Text('New Transaction'),
@@ -273,7 +279,76 @@ class DashboardScreen extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. Segmented Control Switcher (Expense vs Income)
+                    // Scan Receipt Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.document_scanner_outlined),
+                        label: const Text('Scan Receipt'),
+                        onPressed: () async {
+                          final picker = ImagePicker();
+                          final picked = await picker.pickImage(
+                            source: ImageSource.gallery,
+                          );
+                          if (picked == null) return;
+
+                          if (!context.mounted) return;
+                          Navigator.pop(context); // close current dialog
+
+                          final result = await ref
+                              .read(receiptScanProvider.notifier)
+                              .scan(File(picked.path));
+                          if (!context.mounted) return;
+
+                          if (result == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  ref.read(receiptScanProvider).error ??
+                                      'Scan failed',
+                                ),
+                              ),
+                            );
+                            _showAddTransactionDialog(context, ref);
+                          } else {
+                            _showAddTransactionDialog(
+                              context,
+                              ref,
+                              prefill: result,
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Merchant Field
+                    Text(
+                      'MERCHANT',
+                      style: theme.listTileTheme.subtitleTextStyle?.copyWith(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: merchantController,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: theme.scaffoldBackgroundColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Type Switcher
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(4),
@@ -287,14 +362,10 @@ class DashboardScreen extends ConsumerWidget {
                             child: InkWell(
                               onTap: () => setDialogState(() {
                                 selectedType = 'expense';
-
-                                if (categories.any(
-                                  (c) => c.type == 'expense',
-                                )) {
-                                  selectedCategoryId = categories
-                                      .firstWhere((c) => c.type == 'expense')
-                                      .id;
-                                }
+                                selectedCategoryId = categories
+                                    .where((c) => c.type == 'expense')
+                                    .firstOrNull
+                                    ?.id;
                               }),
                               child: Container(
                                 alignment: Alignment.center,
@@ -306,15 +377,6 @@ class DashboardScreen extends ConsumerWidget {
                                       ? theme.cardTheme.color
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(7),
-                                  boxShadow: selectedType == 'expense'
-                                      ? [
-                                          const BoxShadow(
-                                            color: Colors.black12,
-                                            blurRadius: 4,
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ]
-                                      : [],
                                 ),
                                 child: Text(
                                   'Expense',
@@ -334,11 +396,10 @@ class DashboardScreen extends ConsumerWidget {
                             child: InkWell(
                               onTap: () => setDialogState(() {
                                 selectedType = 'income';
-                                if (categories.any((c) => c.type == 'income')) {
-                                  selectedCategoryId = categories
-                                      .firstWhere((c) => c.type == 'income')
-                                      .id;
-                                }
+                                selectedCategoryId = categories
+                                    .where((c) => c.type == 'income')
+                                    .firstOrNull
+                                    ?.id;
                               }),
                               child: Container(
                                 alignment: Alignment.center,
@@ -350,15 +411,6 @@ class DashboardScreen extends ConsumerWidget {
                                       ? theme.cardTheme.color
                                       : Colors.transparent,
                                   borderRadius: BorderRadius.circular(7),
-                                  boxShadow: selectedType == 'income'
-                                      ? [
-                                          const BoxShadow(
-                                            color: Colors.black12,
-                                            blurRadius: 4,
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ]
-                                      : [],
                                 ),
                                 child: Text(
                                   'Income',
@@ -379,7 +431,7 @@ class DashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 20),
 
-                    // 2. Category Selection Dropdown
+                    // Category Dropdown
                     Text(
                       'CATEGORY',
                       style: theme.listTileTheme.subtitleTextStyle?.copyWith(
@@ -400,23 +452,22 @@ class DashboardScreen extends ConsumerWidget {
                           isExpanded: true,
                           dropdownColor: theme.cardTheme.color,
                           hint: const Text('Select Category'),
-                          items: filteredCategories.map((category) {
-                            return DropdownMenuItem<int>(
-                              value: category.id,
-                              child: Text(category.name),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            setDialogState(() {
-                              selectedCategoryId = value;
-                            });
-                          },
+                          items: filteredCategories
+                              .map(
+                                (c) => DropdownMenuItem(
+                                  value: c.id,
+                                  child: Text(c.name),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) =>
+                              setDialogState(() => selectedCategoryId = v),
                         ),
                       ),
                     ),
                     const SizedBox(height: 16),
 
-                    // 3. Amount Field Input
+                    // Amount Field
                     Text(
                       'AMOUNT',
                       style: theme.listTileTheme.subtitleTextStyle?.copyWith(
@@ -427,7 +478,7 @@ class DashboardScreen extends ConsumerWidget {
                     const SizedBox(height: 6),
                     TextField(
                       controller: amountController,
-                      autofocus: true,
+                      autofocus: prefill == null,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
@@ -457,23 +508,23 @@ class DashboardScreen extends ConsumerWidget {
                   onPressed: () {
                     final amount =
                         double.tryParse(amountController.text) ?? 0.0;
-
                     if (amount > 0 && selectedCategoryId != null) {
-                      // Match transaction title to the selected category name automatically
                       final chosenCategory = categories.firstWhere(
                         (c) => c.id == selectedCategoryId,
                       );
-
                       ref
                           .read(expenseViewModelProvider.notifier)
                           .addExpense(
                             ExpenseModel(
-                              title: chosenCategory
-                                  .name, // Auto-assign name from category
+                              title: merchantController.text.isNotEmpty
+                                  ? merchantController.text
+                                  : chosenCategory.name,
                               amount: amount,
                               type: selectedType,
                               categoryId: selectedCategoryId!,
-                              date: DateTime.now().toIso8601String(),
+                              date:
+                                  prefill?.date ??
+                                  DateTime.now().toIso8601String(),
                               createdAt: DateTime.now().toIso8601String(),
                             ),
                           );

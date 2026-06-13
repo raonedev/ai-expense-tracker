@@ -51,11 +51,11 @@ class ChatViewModel extends StateNotifier<ChatState> {
     state = state.copyWith(messages: List.from(_messages), isLoading: true);
 
     try {
-      // 2. Convert natural phrase to safe SQL via Gemini
+      //  Convert natural phrase to safe SQL via Gemini
       final sqlQuery = await _generateSqlFromText(userText);
       dev.log('RAG Engine Generated SQL: $sqlQuery');
 
-      // 3. Directly query your existing local SQLite DBHelper
+      // Directly query your existing local SQLite DBHelper
       dynamic dbResult;
       if (sqlQuery.trim().toUpperCase().startsWith('SELECT')) {
         dbResult = await DBHelper().rawQuery(sqlQuery);
