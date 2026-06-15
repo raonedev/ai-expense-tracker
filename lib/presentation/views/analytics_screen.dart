@@ -1,3 +1,4 @@
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:syncfusion_flutter_charts/charts.dart';
@@ -20,24 +21,25 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     final expenseState = ref.watch(expenseViewModelProvider);
     final theme = Theme.of(context);
 
-    // 1. Filter transactions matching current Timeframe window
     final filteredTransactions = expenseState.expenses.where((tx) {
       final txDate = DateTime.parse(tx.date);
+      
       if (_timeframe == 'week') {
-        final startOfWeek = _focusedDate.subtract(Duration(days: _focusedDate.weekday - 1));
-        final endOfWeek = startOfWeek.add(const Duration(days: 6));
-        return txDate.isAfter(startOfWeek.subtract(const Duration(seconds: 1))) &&
-               txDate.isBefore(endOfWeek.add(const Duration(seconds: 1)));
+        final cleanFocused = DateUtils.dateOnly(_focusedDate);
+        final startOfWeek = cleanFocused.subtract(Duration(days: cleanFocused.weekday - 1));
+        final endOfWeek = startOfWeek.add(const Duration(days: 7)); // Next week's start midnight
+
+        return (txDate.isAtSameMomentAs(startOfWeek) || txDate.isAfter(startOfWeek)) &&
+               txDate.isBefore(endOfWeek);
       } else {
         return txDate.month == _focusedDate.month && txDate.year == _focusedDate.year;
       }
     }).toList();
 
-    // 2. Prep side-by-side Bar Chart Data
-    final List<CashFlowData> barChartData = _generateBarData(filteredTransactions);
-
-    // 3. Prep Category Breakdown Data
-    final List<CategoryShareData> pieChartData = _generatePieData(filteredTransactions);
+    // 2. Prep Chart Data using single-pass optimization
+    final chartData = _generateChartData(filteredTransactions);
+    final List<CashFlowData> barChartData = chartData.barData;
+    final List<CategoryShareData> pieChartData = chartData.pieData;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Analytics')),
@@ -193,7 +195,8 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
 
   String _getDateRangeLabel() {
     if (_timeframe == 'week') {
-      final startOfWeek = _focusedDate.subtract(Duration(days: _focusedDate.weekday - 1));
+      final cleanFocused = DateUtils.dateOnly(_focusedDate);
+      final startOfWeek = cleanFocused.subtract(Duration(days: cleanFocused.weekday - 1));
       final endOfWeek = startOfWeek.add(const Duration(days: 6));
       return "${startOfWeek.day}/${startOfWeek.month} - ${endOfWeek.day}/${endOfWeek.month}";
     } else {
@@ -202,37 +205,37 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen> {
     }
   }
 
-  // Logic to parse transactions into Side-By-Side totals
-  List<CashFlowData> _generateBarData(List<ExpenseModel> items) {
+  // Optimized Single-Pass Processing Data Builder
+  _CombinedChartData _generateChartData(List<ExpenseModel> items) {
     double incomeTotal = 0.0;
     double expenseTotal = 0.0;
+    final Map<String, double> transformMap = {};
 
     for (var tx in items) {
       if (tx.type == 'income') {
         incomeTotal += tx.amount;
       } else {
         expenseTotal += tx.amount;
+        // Map elements to title (or fall back to category ID/String structural identifier)
+        final categoryKey = tx.title.isNotEmpty ? tx.title : 'Category ${tx.categoryId}';
+        transformMap[categoryKey] = (transformMap[categoryKey] ?? 0) + tx.amount;
       }
     }
-    // Return a list with a single bucket grouping comparing totals side by side
-    return [CashFlowData('Total Flows', incomeTotal, expenseTotal)];
-  }
 
-  // Logic to accumulate total spending strictly grouped category-wise
-  List<CategoryShareData> _generatePieData(List<ExpenseModel> items) {
-    final Map<String, double> transformMap = {};
-
-    // Only compute expense allocations for structural charts
-    final spendingEntries = items.where((element) => element.type == 'expense');
-
-    for (var tx in spendingEntries) {
-      transformMap[tx.title] = (transformMap[tx.title] ?? 0) + tx.amount;
-    }
-
-    return transformMap.entries
+    final barData = [CashFlowData('Total Flows', incomeTotal, expenseTotal)];
+    final pieData = transformMap.entries
         .map((entry) => CategoryShareData(entry.key, entry.value))
         .toList();
+
+    return _CombinedChartData(barData, pieData);
   }
+}
+
+// Helper Class to group single-pass data extraction
+class _CombinedChartData {
+  final List<CashFlowData> barData;
+  final List<CategoryShareData> pieData;
+  _CombinedChartData(this.barData, this.pieData);
 }
 
 // ─── Internal Data Holder Models For Syncfusion Series Rendering ─────────────
